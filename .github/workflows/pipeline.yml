@@ -24,10 +24,10 @@
 # master  -> PROD -> Production  -> RunAllTestsInOrg
 #
 # REQUIRED REPOSITORY SECRETS:
-# DEV_SFDX_AUTH_URL
-# SIT_SFDX_AUTH_URL
-# UAT_SFDX_AUTH_URL
-# PROD_SFDX_AUTH_URL
+# SALESFORCE_AUTH_URL_DEV
+# SALESFORCE_AUTH_URL_SIT
+# SALESFORCE_AUTH_URL_UAT
+# SALESFORCE_AUTH_URL_PROD
 #
 # REQUIRED GITHUB ENVIRONMENTS:
 # DEV  : deployment branch DEV
@@ -157,10 +157,10 @@ jobs:
       - name: Authenticate DEV
         if: github.base_ref == 'DEV'
         env:
-          SFDX_AUTH_URL: ${{ secrets.DEV_SFDX_AUTH_URL }}
+          SFDX_AUTH_URL: ${{ secrets.SALESFORCE_AUTH_URL_DEV }}
         run: |
           if [ -z "$SFDX_AUTH_URL" ]; then
-            echo "::error::Repository secret DEV_SFDX_AUTH_URL is missing."
+            echo "::error::Repository secret SALESFORCE_AUTH_URL_DEV is missing."
             exit 1
           fi
           printf '%s\n' "$SFDX_AUTH_URL" | sf org login sfdx-url \
@@ -171,10 +171,10 @@ jobs:
       - name: Authenticate SIT
         if: github.base_ref == 'SIT'
         env:
-          SFDX_AUTH_URL: ${{ secrets.SIT_SFDX_AUTH_URL }}
+          SFDX_AUTH_URL: ${{ secrets.SALESFORCE_AUTH_URL_SIT }}
         run: |
           if [ -z "$SFDX_AUTH_URL" ]; then
-            echo "::error::Repository secret SIT_SFDX_AUTH_URL is missing."
+            echo "::error::Repository secret SALESFORCE_AUTH_URL_SIT is missing."
             exit 1
           fi
           printf '%s\n' "$SFDX_AUTH_URL" | sf org login sfdx-url \
@@ -185,10 +185,10 @@ jobs:
       - name: Authenticate UAT
         if: github.base_ref == 'UAT'
         env:
-          SFDX_AUTH_URL: ${{ secrets.UAT_SFDX_AUTH_URL }}
+          SFDX_AUTH_URL: ${{ secrets.SALESFORCE_AUTH_URL_UAT }}
         run: |
           if [ -z "$SFDX_AUTH_URL" ]; then
-            echo "::error::Repository secret UAT_SFDX_AUTH_URL is missing."
+            echo "::error::Repository secret SALESFORCE_AUTH_URL_UAT is missing."
             exit 1
           fi
           printf '%s\n' "$SFDX_AUTH_URL" | sf org login sfdx-url \
@@ -199,10 +199,10 @@ jobs:
       - name: Authenticate PROD
         if: github.base_ref == 'master'
         env:
-          SFDX_AUTH_URL: ${{ secrets.PROD_SFDX_AUTH_URL }}
+          SFDX_AUTH_URL: ${{ secrets.SALESFORCE_AUTH_URL_PROD }}
         run: |
           if [ -z "$SFDX_AUTH_URL" ]; then
-            echo "::error::Repository secret PROD_SFDX_AUTH_URL is missing."
+            echo "::error::Repository secret SALESFORCE_AUTH_URL_PROD is missing."
             exit 1
           fi
           printf '%s\n' "$SFDX_AUTH_URL" | sf org login sfdx-url \
@@ -371,10 +371,10 @@ jobs:
       - name: Authenticate DEV
         if: github.ref_name == 'DEV'
         env:
-          SFDX_AUTH_URL: ${{ secrets.DEV_SFDX_AUTH_URL }}
+          SFDX_AUTH_URL: ${{ secrets.SALESFORCE_AUTH_URL_DEV }}
         run: |
           if [ -z "$SFDX_AUTH_URL" ]; then
-            echo "::error::Repository secret DEV_SFDX_AUTH_URL is missing."
+            echo "::error::Repository secret SALESFORCE_AUTH_URL_DEV is missing."
             exit 1
           fi
           printf '%s\n' "$SFDX_AUTH_URL" | sf org login sfdx-url \
@@ -385,10 +385,10 @@ jobs:
       - name: Authenticate SIT
         if: github.ref_name == 'SIT'
         env:
-          SFDX_AUTH_URL: ${{ secrets.SIT_SFDX_AUTH_URL }}
+          SFDX_AUTH_URL: ${{ secrets.SALESFORCE_AUTH_URL_SIT }}
         run: |
           if [ -z "$SFDX_AUTH_URL" ]; then
-            echo "::error::Repository secret SIT_SFDX_AUTH_URL is missing."
+            echo "::error::Repository secret SALESFORCE_AUTH_URL_SIT is missing."
             exit 1
           fi
           printf '%s\n' "$SFDX_AUTH_URL" | sf org login sfdx-url \
@@ -399,10 +399,10 @@ jobs:
       - name: Authenticate UAT
         if: github.ref_name == 'UAT'
         env:
-          SFDX_AUTH_URL: ${{ secrets.UAT_SFDX_AUTH_URL }}
+          SFDX_AUTH_URL: ${{ secrets.SALESFORCE_AUTH_URL_UAT }}
         run: |
           if [ -z "$SFDX_AUTH_URL" ]; then
-            echo "::error::Repository secret UAT_SFDX_AUTH_URL is missing."
+            echo "::error::Repository secret SALESFORCE_AUTH_URL_UAT is missing."
             exit 1
           fi
           printf '%s\n' "$SFDX_AUTH_URL" | sf org login sfdx-url \
@@ -413,10 +413,10 @@ jobs:
       - name: Authenticate PROD
         if: github.ref_name == 'master'
         env:
-          SFDX_AUTH_URL: ${{ secrets.PROD_SFDX_AUTH_URL }}
+          SFDX_AUTH_URL: ${{ secrets.SALESFORCE_AUTH_URL_PROD }}
         run: |
           if [ -z "$SFDX_AUTH_URL" ]; then
-            echo "::error::Repository secret PROD_SFDX_AUTH_URL is missing."
+            echo "::error::Repository secret SALESFORCE_AUTH_URL_PROD is missing."
             exit 1
           fi
           printf '%s\n' "$SFDX_AUTH_URL" | sf org login sfdx-url \
