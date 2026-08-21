@@ -1,12 +1,38 @@
 # ================================================================
-# Salesforce Delta Deployment Pipeline
+# Salesforce Delta Deployment Pipeline with Promotion Approvals
 #
-# FLOW:
-# 1. Developer creates PR
-# 2. Delta validation runs automatically against target org
-# 3. Reviewer approves PR manually
-# 4. PR is merged
-# 5. Delta deployment runs automatically
+# PROMOTION FLOW:
+#
+# Feature Branch -> DEV
+#   1. Developer creates PR to DEV
+#   2. Delta validation runs against DEV
+#   3. Reviewer approves PR
+#   4. PR is merged
+#   5. DEV deployment runs automatically
+#
+# DEV -> SIT
+#   1. Create PR from DEV to SIT
+#   2. Delta validation runs against SIT
+#   3. Reviewer approves PR
+#   4. PR is merged
+#   5. GitHub SIT environment approval is required
+#   6. After approval, deployment runs against SIT
+#
+# SIT -> UAT
+#   1. Create PR from SIT to UAT
+#   2. Delta validation runs against UAT
+#   3. Reviewer approves PR
+#   4. PR is merged
+#   5. GitHub UAT environment approval is required
+#   6. After approval, deployment runs against UAT
+#
+# UAT -> master / PROD
+#   1. Create PR from UAT to master
+#   2. Delta validation runs against PROD
+#   3. Reviewer approves PR
+#   4. PR is merged
+#   5. GitHub PROD environment approval is required
+#   6. After approval, deployment runs against PROD
 #
 # BRANCH -> ORG MAPPING:
 # DEV     -> DEV Sandbox   (NoTestRun)
@@ -14,9 +40,14 @@
 # UAT     -> UAT Sandbox   (RunLocalTests)
 # master  -> PRODUCTION    (RunAllTestsInOrg)
 #
-# IMPORTANT:
-# Configure GitHub Branch Protection / Rulesets so direct pushes
-# to DEV, SIT, UAT and master aren't allowed.
+# IMPORTANT GITHUB CONFIGURATION:
+# 1. Protect DEV, SIT, UAT and master using Branch Rules / Rulesets.
+# 2. Require Pull Requests and reviewer approval before merge.
+# 3. Block direct pushes to protected branches.
+# 4. Create GitHub Environments: DEV, SIT, UAT and PROD.
+# 5. DEV environment: no deployment reviewer required.
+# 6. SIT/UAT/PROD environments: configure Required Reviewers.
+# 7. Enable "Prevent self-review" for SIT/UAT/PROD if available.
 # ================================================================
 
 name: Salesforce Delta Pipeline
@@ -41,20 +72,78 @@ permissions:
 
 jobs:
 
-  salesforce-deployment:
+  # ==============================================================
+  # PR VALIDATION JOB
+  #
+  # Runs before PR merge.
+  # This job DOES NOT use GitHub deployment environments, therefore
+  # deployment approval is not requested during validation.
+  # ==============================================================
+  validate:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
 
       # ------------------------------------------------------------
+      # Enforce promotion path
+      # ------------------------------------------------------------
+      - name: Validate Promotion Path
+        shell: bash
+        run: |
+          BASE_BRANCH="${{ github.base_ref }}"
+          SOURCE_BRANCH="${{ github.head_ref }}"
+
+          echo "Source Branch : $SOURCE_BRANCH"
+          echo "Target Branch : $BASE_BRANCH"
+
+          case "$BASE_BRANCH" in
+
+            DEV)
+              echo "Feature/working branch -> DEV promotion allowed."
+              ;;
+
+            SIT)
+              if [ "$SOURCE_BRANCH" != "DEV" ]; then
+                echo "ERROR: SIT can only receive changes from DEV."
+                echo "Expected: DEV -> SIT"
+                echo "Actual  : $SOURCE_BRANCH -> SIT"
+                exit 1
+              fi
+              ;;
+
+            UAT)
+              if [ "$SOURCE_BRANCH" != "SIT" ]; then
+                echo "ERROR: UAT can only receive changes from SIT."
+                echo "Expected: SIT -> UAT"
+                echo "Actual  : $SOURCE_BRANCH -> UAT"
+                exit 1
+              fi
+              ;;
+
+            master)
+              if [ "$SOURCE_BRANCH" != "UAT" ]; then
+                echo "ERROR: PROD/master can only receive changes from UAT."
+                echo "Expected: UAT -> master"
+                echo "Actual  : $SOURCE_BRANCH -> master"
+                exit 1
+              fi
+              ;;
+
+            *)
+              echo "Unsupported target branch: $BASE_BRANCH"
+              exit 1
+              ;;
+
+          esac
+
+      # ------------------------------------------------------------
       # Checkout complete repository history
-      # Required by sfdx-git-delta
       # ------------------------------------------------------------
       - name: Checkout Full Git History
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
 
       # ------------------------------------------------------------
       # Install Salesforce CLI
@@ -62,10 +151,8 @@ jobs:
       - name: Install Salesforce CLI
         run: |
           npm install --global @salesforce/cli
-
           echo "Salesforce CLI Version:"
           sf --version
-
 
       # ------------------------------------------------------------
       # Install sfdx-git-delta
@@ -73,81 +160,57 @@ jobs:
       - name: Install sfdx-git-delta
         run: |
           echo y | sf plugins install sfdx-git-delta
-
           echo "Installed Plugins:"
           sf plugins
 
-
       # ------------------------------------------------------------
-      # Determine Target Environment
-      #
-      # PR:
-      # github.base_ref = target branch
-      #
-      # PUSH:
-      # github.ref_name = pushed branch
+      # Determine validation target from PR base branch
       # ------------------------------------------------------------
-      - name: Set Environment Variables
+      - name: Set Validation Environment Variables
         shell: bash
         run: |
-
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BRANCH="${{ github.base_ref }}"
-          else
-            BRANCH="${{ github.ref_name }}"
-          fi
+          BRANCH="${{ github.base_ref }}"
 
           echo "Target Branch: $BRANCH"
 
           case "$BRANCH" in
 
             DEV)
-
               echo "AUTH_URL=${{ secrets.SALESFORCE_AUTH_URL_DEV }}" >> "$GITHUB_ENV"
               echo "TEST_LEVEL=NoTestRun" >> "$GITHUB_ENV"
               echo "ENV_NAME=DEV" >> "$GITHUB_ENV"
               ;;
 
-
             SIT)
-
               echo "AUTH_URL=${{ secrets.SALESFORCE_AUTH_URL_SIT }}" >> "$GITHUB_ENV"
               echo "TEST_LEVEL=RunLocalTests" >> "$GITHUB_ENV"
               echo "ENV_NAME=SIT" >> "$GITHUB_ENV"
               ;;
 
-
             UAT)
-
               echo "AUTH_URL=${{ secrets.SALESFORCE_AUTH_URL_UAT }}" >> "$GITHUB_ENV"
               echo "TEST_LEVEL=RunLocalTests" >> "$GITHUB_ENV"
               echo "ENV_NAME=UAT" >> "$GITHUB_ENV"
               ;;
 
-
             master)
-
               echo "AUTH_URL=${{ secrets.SALESFORCE_AUTH_URL_PROD }}" >> "$GITHUB_ENV"
               echo "TEST_LEVEL=RunAllTestsInOrg" >> "$GITHUB_ENV"
               echo "ENV_NAME=PROD" >> "$GITHUB_ENV"
               ;;
 
-
             *)
-
               echo "Unsupported branch: $BRANCH"
               exit 1
               ;;
 
           esac
 
-
       # ------------------------------------------------------------
-      # Authenticate Target Salesforce Org
+      # Authenticate validation target org
       # ------------------------------------------------------------
       - name: Authenticate to Salesforce
         run: |
-
           echo "${{ env.AUTH_URL }}" | sf org login sfdx-url \
             --alias target-org \
             --set-default \
@@ -155,36 +218,13 @@ jobs:
 
           echo "Authenticated to ${{ env.ENV_NAME }}"
 
-
       # ------------------------------------------------------------
-      # Determine Delta Starting Commit
-      #
-      # PR:
-      # Compare target branch before PR changes -> PR merged result
-      #
-      # PUSH:
-      # Compare repository state before push -> current HEAD
-      #
-      # This handles pushes containing multiple commits.
+      # PR delta starts from target branch SHA
       # ------------------------------------------------------------
       - name: Determine Delta Range
         shell: bash
         run: |
-
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-
-            FROM_SHA="${{ github.event.pull_request.base.sha }}"
-
-          else
-
-            FROM_SHA="${{ github.event.before }}"
-
-            # Handle first push / unusual branch creation
-            if [ "$FROM_SHA" = "0000000000000000000000000000000000000000" ]; then
-              FROM_SHA="HEAD~1"
-            fi
-
-          fi
+          FROM_SHA="${{ github.event.pull_request.base.sha }}"
 
           echo "FROM_SHA=$FROM_SHA" >> "$GITHUB_ENV"
 
@@ -194,13 +234,11 @@ jobs:
           echo "TO  : HEAD"
           echo "========================================"
 
-
       # ------------------------------------------------------------
       # Generate Delta Package
       # ------------------------------------------------------------
       - name: Generate Delta Package
         run: |
-
           rm -rf delta
           mkdir -p delta
 
@@ -230,36 +268,27 @@ jobs:
             cat delta/destructiveChanges/destructiveChanges.xml
           fi
 
-
       # ------------------------------------------------------------
-      # Check whether Delta contains metadata
+      # Check whether delta contains metadata
       # ------------------------------------------------------------
       - name: Check Delta Changes
         shell: bash
         run: |
-
           HAS_PACKAGE=false
           HAS_DESTRUCTIVE=false
 
           if [ -f "delta/package/package.xml" ] && \
              grep -q '<types>' "delta/package/package.xml"; then
-
             HAS_PACKAGE=true
-
           fi
-
 
           if [ -f "delta/destructiveChanges/destructiveChanges.xml" ] && \
              grep -q '<types>' "delta/destructiveChanges/destructiveChanges.xml"; then
-
             HAS_DESTRUCTIVE=true
-
           fi
-
 
           echo "HAS_PACKAGE=$HAS_PACKAGE" >> "$GITHUB_ENV"
           echo "HAS_DESTRUCTIVE=$HAS_DESTRUCTIVE" >> "$GITHUB_ENV"
-
 
           echo "========================================"
           echo "Delta Summary"
@@ -267,47 +296,26 @@ jobs:
           echo "Destructive Changes : $HAS_DESTRUCTIVE"
           echo "========================================"
 
-
-      # ============================================================
-      # PR VALIDATION
-      # ============================================================
+      # ------------------------------------------------------------
+      # Validate Salesforce delta
+      # ------------------------------------------------------------
       - name: Validate Delta - ${{ env.ENV_NAME }}
         if: >
-          github.event_name == 'pull_request' &&
-          (env.HAS_PACKAGE == 'true' ||
-          env.HAS_DESTRUCTIVE == 'true')
-
+          env.HAS_PACKAGE == 'true' ||
+          env.HAS_DESTRUCTIVE == 'true'
         shell: bash
-
         run: |
-
           echo "========================================"
           echo "Validating Salesforce Delta"
           echo "Environment : ${{ env.ENV_NAME }}"
           echo "Test Level  : ${{ env.TEST_LEVEL }}"
           echo "========================================"
 
-
-          # --------------------------------------------------------
-          # Choose Manifest
-          #
-          # If we have normal metadata changes:
-          # use delta/package/package.xml
-          #
-          # If we have only destructive changes:
-          # use destructiveChanges/package.xml
-          # --------------------------------------------------------
-
           if [ "${{ env.HAS_PACKAGE }}" = "true" ]; then
-
             MANIFEST="delta/package/package.xml"
-
           else
-
             MANIFEST="delta/destructiveChanges/package.xml"
-
           fi
-
 
           CMD=(
             sf project deploy start
@@ -318,59 +326,233 @@ jobs:
             --wait 120
           )
 
-
-          # --------------------------------------------------------
-          # Include destructive changes in validation
-          # --------------------------------------------------------
-
           if [ "${{ env.HAS_DESTRUCTIVE }}" = "true" ]; then
-
             CMD+=(
               --post-destructive-changes
               "delta/destructiveChanges/destructiveChanges.xml"
             )
-
           fi
-
 
           "${CMD[@]}"
 
+      - name: No Salesforce Metadata Changes
+        if: >
+          env.HAS_PACKAGE != 'true' &&
+          env.HAS_DESTRUCTIVE != 'true'
+        run: |
+          echo "No Salesforce metadata changes detected."
+          echo "Skipping Salesforce validation."
 
-      # ============================================================
-      # ACTUAL DEPLOYMENT
-      # Runs only after code is merged / pushed to target branch
-      # ============================================================
+  # ==============================================================
+  # ACTUAL DEPLOYMENT JOB
+  #
+  # Triggered only after merge/push to the target branch.
+  #
+  # GitHub Environment mapping:
+  # DEV    -> DEV   (no required reviewer)
+  # SIT    -> SIT   (required reviewer)
+  # UAT    -> UAT   (required reviewer)
+  # master -> PROD  (required reviewer)
+  #
+  # Because this job references a GitHub Environment, GitHub pauses
+  # the job before it starts when that environment requires review.
+  # ==============================================================
+  deploy:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    environment:
+      name: ${{ github.ref_name == 'master' && 'PROD' || github.ref_name }}
+
+    concurrency:
+      group: salesforce-deploy-${{ github.ref_name }}
+      cancel-in-progress: false
+
+    steps:
+
+      # ------------------------------------------------------------
+      # Checkout complete repository history
+      # ------------------------------------------------------------
+      - name: Checkout Full Git History
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # ------------------------------------------------------------
+      # Install Salesforce CLI
+      # ------------------------------------------------------------
+      - name: Install Salesforce CLI
+        run: |
+          npm install --global @salesforce/cli
+          echo "Salesforce CLI Version:"
+          sf --version
+
+      # ------------------------------------------------------------
+      # Install sfdx-git-delta
+      # ------------------------------------------------------------
+      - name: Install sfdx-git-delta
+        run: |
+          echo y | sf plugins install sfdx-git-delta
+          echo "Installed Plugins:"
+          sf plugins
+
+      # ------------------------------------------------------------
+      # Determine deployment target from pushed branch
+      # ------------------------------------------------------------
+      - name: Set Deployment Environment Variables
+        shell: bash
+        run: |
+          BRANCH="${{ github.ref_name }}"
+
+          echo "Target Branch: $BRANCH"
+
+          case "$BRANCH" in
+
+            DEV)
+              echo "AUTH_URL=${{ secrets.SALESFORCE_AUTH_URL_DEV }}" >> "$GITHUB_ENV"
+              echo "TEST_LEVEL=NoTestRun" >> "$GITHUB_ENV"
+              echo "ENV_NAME=DEV" >> "$GITHUB_ENV"
+              ;;
+
+            SIT)
+              echo "AUTH_URL=${{ secrets.SALESFORCE_AUTH_URL_SIT }}" >> "$GITHUB_ENV"
+              echo "TEST_LEVEL=RunLocalTests" >> "$GITHUB_ENV"
+              echo "ENV_NAME=SIT" >> "$GITHUB_ENV"
+              ;;
+
+            UAT)
+              echo "AUTH_URL=${{ secrets.SALESFORCE_AUTH_URL_UAT }}" >> "$GITHUB_ENV"
+              echo "TEST_LEVEL=RunLocalTests" >> "$GITHUB_ENV"
+              echo "ENV_NAME=UAT" >> "$GITHUB_ENV"
+              ;;
+
+            master)
+              echo "AUTH_URL=${{ secrets.SALESFORCE_AUTH_URL_PROD }}" >> "$GITHUB_ENV"
+              echo "TEST_LEVEL=RunAllTestsInOrg" >> "$GITHUB_ENV"
+              echo "ENV_NAME=PROD" >> "$GITHUB_ENV"
+              ;;
+
+            *)
+              echo "Unsupported branch: $BRANCH"
+              exit 1
+              ;;
+
+          esac
+
+      # ------------------------------------------------------------
+      # Authenticate deployment target org
+      # ------------------------------------------------------------
+      - name: Authenticate to Salesforce
+        run: |
+          echo "${{ env.AUTH_URL }}" | sf org login sfdx-url \
+            --alias target-org \
+            --set-default \
+            --sfdx-url-stdin
+
+          echo "Authenticated to ${{ env.ENV_NAME }}"
+
+      # ------------------------------------------------------------
+      # PUSH delta starts from repository state before push
+      # ------------------------------------------------------------
+      - name: Determine Delta Range
+        shell: bash
+        run: |
+          FROM_SHA="${{ github.event.before }}"
+
+          if [ "$FROM_SHA" = "0000000000000000000000000000000000000000" ]; then
+            FROM_SHA="HEAD~1"
+          fi
+
+          echo "FROM_SHA=$FROM_SHA" >> "$GITHUB_ENV"
+
+          echo "========================================"
+          echo "Delta Range"
+          echo "FROM: $FROM_SHA"
+          echo "TO  : HEAD"
+          echo "========================================"
+
+      # ------------------------------------------------------------
+      # Generate Delta Package
+      # ------------------------------------------------------------
+      - name: Generate Delta Package
+        run: |
+          rm -rf delta
+          mkdir -p delta
+
+          sf sgd source delta \
+            --from "${{ env.FROM_SHA }}" \
+            --to HEAD \
+            --output-dir delta \
+            --source-dir force-app \
+            --generate-delta
+
+          echo ""
+          echo "========================================"
+          echo "Delta Package"
+          echo "Environment: ${{ env.ENV_NAME }}"
+          echo "========================================"
+
+          if [ -f "delta/package/package.xml" ]; then
+            cat delta/package/package.xml
+          fi
+
+          echo ""
+          echo "========================================"
+          echo "Destructive Changes"
+          echo "========================================"
+
+          if [ -f "delta/destructiveChanges/destructiveChanges.xml" ]; then
+            cat delta/destructiveChanges/destructiveChanges.xml
+          fi
+
+      # ------------------------------------------------------------
+      # Check whether delta contains metadata
+      # ------------------------------------------------------------
+      - name: Check Delta Changes
+        shell: bash
+        run: |
+          HAS_PACKAGE=false
+          HAS_DESTRUCTIVE=false
+
+          if [ -f "delta/package/package.xml" ] && \
+             grep -q '<types>' "delta/package/package.xml"; then
+            HAS_PACKAGE=true
+          fi
+
+          if [ -f "delta/destructiveChanges/destructiveChanges.xml" ] && \
+             grep -q '<types>' "delta/destructiveChanges/destructiveChanges.xml"; then
+            HAS_DESTRUCTIVE=true
+          fi
+
+          echo "HAS_PACKAGE=$HAS_PACKAGE" >> "$GITHUB_ENV"
+          echo "HAS_DESTRUCTIVE=$HAS_DESTRUCTIVE" >> "$GITHUB_ENV"
+
+          echo "========================================"
+          echo "Delta Summary"
+          echo "Package Changes     : $HAS_PACKAGE"
+          echo "Destructive Changes : $HAS_DESTRUCTIVE"
+          echo "========================================"
+
+      # ------------------------------------------------------------
+      # Deploy Salesforce delta
+      # ------------------------------------------------------------
       - name: Deploy Delta - ${{ env.ENV_NAME }}
         if: >
-          github.event_name == 'push' &&
-          (env.HAS_PACKAGE == 'true' ||
-          env.HAS_DESTRUCTIVE == 'true')
-
+          env.HAS_PACKAGE == 'true' ||
+          env.HAS_DESTRUCTIVE == 'true'
         shell: bash
-
         run: |
-
           echo "========================================"
           echo "Deploying Salesforce Delta"
           echo "Environment : ${{ env.ENV_NAME }}"
           echo "Test Level  : ${{ env.TEST_LEVEL }}"
           echo "========================================"
 
-
-          # --------------------------------------------------------
-          # Select correct manifest
-          # --------------------------------------------------------
-
           if [ "${{ env.HAS_PACKAGE }}" = "true" ]; then
-
             MANIFEST="delta/package/package.xml"
-
           else
-
             MANIFEST="delta/destructiveChanges/package.xml"
-
           fi
-
 
           CMD=(
             sf project deploy start
@@ -380,32 +562,19 @@ jobs:
             --wait 120
           )
 
-
-          # --------------------------------------------------------
-          # Add destructive changes to same deployment
-          # --------------------------------------------------------
-
           if [ "${{ env.HAS_DESTRUCTIVE }}" = "true" ]; then
-
             CMD+=(
               --post-destructive-changes
               "delta/destructiveChanges/destructiveChanges.xml"
             )
-
           fi
-
 
           "${CMD[@]}"
 
-
-      # ------------------------------------------------------------
-      # No Salesforce Metadata Changes
-      # ------------------------------------------------------------
       - name: No Salesforce Metadata Changes
         if: >
           env.HAS_PACKAGE != 'true' &&
           env.HAS_DESTRUCTIVE != 'true'
-
         run: |
           echo "No Salesforce metadata changes detected."
-          echo "Skipping Salesforce validation/deployment."
+          echo "Skipping Salesforce deployment."
